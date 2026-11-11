@@ -51,13 +51,13 @@
     saveMedia: (blob, onProgress) => saveMediaBrowser(blob, onProgress), mediaURL,
     async openURL(url) { window.open(url, '_blank'); },
     async speechAuth() { return 'ok'; },
-    async higgsQuote() { throw new Error('Higgsfield works in the Mac app'); },
-    async higgsMake() { throw new Error('Higgsfield works in the Mac app'); },
-    async drawFill() { throw new Error('Drawing illustrations works in the Mac app'); },
+    async higgsQuote() { throw new Error('O Higgsfield funciona no aplicativo'); },
+    async higgsMake() { throw new Error('O Higgsfield funciona no aplicativo'); },
+    async drawFill() { throw new Error('Desenhar ilustrações funciona no aplicativo'); },
     async fonts() { return ['DM Sans', 'Caveat', 'Inter', 'Helvetica Neue', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'SF Pro Display', 'Avenir Next', 'Futura', 'Menlo']; },
-    async exportRect() { throw new Error('Exporting works in the Mac app'); },
-    async transcribe() { throw new Error('Mochi writes out voice memos in the Mac app'); },
-    async rewrite() { throw new Error('Mochi rewrites text with Claude in the Mac app'); },
+    async exportRect() { throw new Error('Exportar imagens funciona no aplicativo'); },
+    async transcribe() { throw new Error('A Mochi transcreve notas de voz no aplicativo'); },
+    async rewrite() { throw new Error('A Mochi reescreve textos com o Claude no aplicativo'); },
     // in a browser: an ordinary download
     async saveFile(data, name, ext) { const bin = atob(data), u8 = Uint8Array.from(bin, c => c.charCodeAt(0)); const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([u8], { type: ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : 'application/octet-stream' })); a.download = `${name}.${ext}`;
@@ -65,20 +65,20 @@
     // in a browser: print the doc in a hidden frame, and the browser's own "Save as PDF" does the rest
     async docPDF(html) { const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0;opacity:0'; document.body.appendChild(f);
       f.srcdoc = html.replace(/__WEB__\//g, location.href.replace(/[^/]*$/, '')); await new Promise(r => f.onload = r); await f.contentDocument.fonts?.ready; f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 60000); return ''; },
-    async reveal() { alert('Your boards live in this browser while you try Mochiboard here. In the Mac app this opens their folder.'); },
+    async reveal() { alert('Seus quadros ficam salvos neste navegador enquanto você testa o Mochiboard aqui. No aplicativo isso abre a pasta deles.'); },
     async linkShot() { return ''; },   // the browser can't render other sites itself; the canvas asks a screenshot service instead
     async linkPreview(url) { let host = url; try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (e) {} return { title: host, desc: url, image: '' }; },
     // a pretend Mochi for the browser: she still tidies things up so the canvas can be tried without the app
     async ask(prompt, board) {
       await new Promise(r => setTimeout(r, 900));
       const notes = board.cards.filter(c => c.type === 'note');
-      if (/group|sort|organi[sz]e|tidy/i.test(prompt) && notes.length) {
+      if (/group|sort|organi[sz]e|tidy|agrup|orden|organi[sz]|arrum/i.test(prompt) && notes.length) {
         const cx = Math.min(...board.cards.map(c => c.x)), cy = Math.min(...board.cards.map(c => c.y));
-        return JSON.stringify({ say: `I lined up your ${notes.length} notes into one tidy column. (In the Mac app I'd really sort them by theme with Claude.)`,
-          titles: [{ text: 'Sorted', x: cx, y: cy - 90 }], move: notes.map((n, i) => ({ id: n.id, x: cx + (i % 3) * 250, y: cy + Math.floor(i / 3) * 170 })) });
+        return JSON.stringify({ say: `Alinhei suas ${notes.length} notas em uma coluna organizada. (No aplicativo eu organizaria tudo por tema com o Claude.)`,
+          titles: [{ text: 'Organizadas', x: cx, y: cy - 90 }], move: notes.map((n, i) => ({ id: n.id, x: cx + (i % 3) * 250, y: cy + Math.floor(i / 3) * 170 })) });
       }
-      return JSON.stringify({ say: "Here's a little starter set! (This is pretend Mochi in the browser. In the Mac app I think with Claude Code.)",
-        add: [{ type: 'note', text: 'What is this for?', color: 'butter' }, { type: 'note', text: 'Who will see it?', color: 'mint' }, { type: 'note', text: 'What does done look like?', color: 'lilac' }] });
+      return JSON.stringify({ say: "Aqui vai um ponto de partida! (Esta é a Mochi de demonstração no navegador. No aplicativo eu penso com o Claude Code.)",
+        add: [{ type: 'note', text: 'Para que serve isso?', color: 'butter' }, { type: 'note', text: 'Quem vai ver?', color: 'mint' }, { type: 'note', text: 'Como saber que está pronto?', color: 'lilac' }] });
     },
   };
   // saved videos are "mbmedia://media/<name>" on every computer; on Windows the web view reaches that address as http://mbmedia.localhost
