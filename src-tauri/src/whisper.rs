@@ -35,15 +35,15 @@ async fn fetch() -> Result<(), String> {
     use tokio::io::AsyncWriteExt;
     let dir = model().parent().unwrap().to_path_buf(); tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
     let part = dir.join("ggml-base.bin.part");
-    let mut resp = reqwest::Client::new().get(MODEL_URL).send().await.map_err(|_| "I couldn't reach the download. Check your internet and try again.")?;
-    if !resp.status().is_success() { return Err(format!("The download didn't start ({}).", resp.status())); }
+    let mut resp = reqwest::Client::new().get(MODEL_URL).send().await.map_err(|_| "Não consegui acessar o download. Verifique sua internet e tente novamente.")?;
+    if !resp.status().is_success() { return Err(format!("O download não iniciou ({}).", resp.status())); }
     TOTAL.store(resp.content_length().unwrap_or(147_964_211), Relaxed);
     let mut f = tokio::fs::File::create(&part).await.map_err(|e| e.to_string())?;
-    while let Some(chunk) = resp.chunk().await.map_err(|_| "The download stopped partway. Try again.")? {
+    while let Some(chunk) = resp.chunk().await.map_err(|_| "O download foi interrompido no meio. Tente novamente.")? {
         f.write_all(&chunk).await.map_err(|e| e.to_string())?; GOT.fetch_add(chunk.len() as u64, Relaxed);
     }
     f.flush().await.map_err(|e| e.to_string())?; drop(f);
-    if std::fs::metadata(&part).map_or(0, |m| m.len()) < MODEL_SIZE_MIN { let _ = std::fs::remove_file(&part); return Err("The download came through incomplete. Try again.".into()); }
+    if std::fs::metadata(&part).map_or(0, |m| m.len()) < MODEL_SIZE_MIN { let _ = std::fs::remove_file(&part); return Err("O download veio incompleto. Tente novamente.".into()); }
     std::fs::rename(&part, model()).map_err(|e| e.to_string())
 }
 
@@ -53,7 +53,7 @@ pub fn transcribe(samples: &[f32]) -> Result<String, String> {
     let ctx = {
         let mut slot = CTX.lock().unwrap();
         if slot.is_none() {
-            let c = WhisperContext::new_with_params(model(), WhisperContextParameters::default()).map_err(|e| format!("Whisper couldn't start: {e}"))?;
+            let c = WhisperContext::new_with_params(model(), WhisperContextParameters::default()).map_err(|e| format!("O Whisper não conseguiu iniciar: {e}"))?;
             *slot = Some(Arc::new(c));
         }
         slot.as_ref().unwrap().clone()
@@ -64,7 +64,7 @@ pub fn transcribe(samples: &[f32]) -> Result<String, String> {
     p.set_n_threads(std::thread::available_parallelism().map_or(4, |n| n.get().min(8)) as i32);
     p.set_print_special(false); p.set_print_progress(false); p.set_print_realtime(false); p.set_print_timestamps(false);
     p.set_suppress_blank(true);
-    state.full(p, samples).map_err(|e| format!("Whisper couldn't finish: {e}"))?;
+    state.full(p, samples).map_err(|e| format!("O Whisper não conseguiu concluir: {e}"))?;
     let text: Vec<String> = state.as_iter().map(|seg| seg.to_string().trim().to_string()).filter(|t| !t.is_empty()).collect();
     Ok(text.join(" ").replace("  ", " ").trim().to_string())
 }

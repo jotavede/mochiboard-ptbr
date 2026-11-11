@@ -11,7 +11,13 @@ mod whisper { use serde_json::{json, Value}; pub fn status() -> Value { json!({ 
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde_json::{json, Map, Value};
 use std::{path::PathBuf, sync::Mutex, time::Duration};
-use tauri::{http, Manager};
+use tauri::{
+    http,
+    image::Image,
+    menu::{MenuBuilder, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager, WindowEvent,
+};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -43,7 +49,7 @@ async fn mb(app: tauri::AppHandle, op: String, args: Value) -> Result<Value, Str
                 let p = e.path(); if p.extension().map_or(true, |x| x != "json") { continue; }
                 let Ok(txt) = std::fs::read_to_string(&p) else { continue }; let Ok(j) = serde_json::from_str::<Value>(&txt) else { continue };
                 let updated = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0.0, |d| d.as_secs_f64());
-                list.push(json!({ "id": j.get("id").cloned().unwrap_or(json!("")), "name": j.get("name").cloned().unwrap_or(json!("Untitled")),
+                list.push(json!({ "id": j.get("id").cloned().unwrap_or(json!("")), "name": j.get("name").cloned().unwrap_or(json!("Sem título")),
                     "color": j.get("color").cloned().unwrap_or(json!("pink")), "folder": j.get("folder").cloned().unwrap_or(Value::Null),
                     "parent": j.get("parent").cloned().unwrap_or(Value::Null), "updated": updated }));
             }
@@ -52,7 +58,7 @@ async fn mb(app: tauri::AppHandle, op: String, args: Value) -> Result<Value, Str
         }
         "load" => Ok(std::fs::read_to_string(boards_dir().join(format!("{}.json", safe(a.get("id"))))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)),
         "save" => {
-            let b = a.get("board").ok_or("bad board")?; let f = boards_dir().join(format!("{}.json", safe(b.get("id")))); let tmp = f.with_extension("json.tmp");
+            let b = a.get("board").ok_or("quadro inválido")?; let f = boards_dir().join(format!("{}.json", safe(b.get("id")))); let tmp = f.with_extension("json.tmp");
             std::fs::write(&tmp, serde_json::to_vec(b).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, &f).map_err(|e| e.to_string())?; Ok(json!(true))
         }
@@ -61,12 +67,12 @@ async fn mb(app: tauri::AppHandle, op: String, args: Value) -> Result<Value, Str
         "remove" => { let _ = std::fs::remove_file(boards_dir().join(format!("{}.json", safe(a.get("id"))))); Ok(json!(true)) }
         // the web
         "linkPreview" => Ok(link_preview(s(a, "url")).await),
-        "fetchImage" => fetch_image(s(a, "url")).await.ok_or_else(|| "couldn't load that image".into()),
+        "fetchImage" => fetch_image(s(a, "url")).await.ok_or_else(|| "não consegui carregar essa imagem".into()),
         // Mochi
         "connections" => Ok(connections().await),
         "ask" => ask(a).await.map(Value::String),
         "rewrite" => {
-            let p = prompts::REWRITE.replace("{TITLE}", if s(a, "title").is_empty() { "Untitled" } else { s(a, "title") }).replace("{HOW}", s(a, "how"))
+            let p = prompts::REWRITE.replace("{TITLE}", if s(a, "title").is_empty() { "Sem título" } else { s(a, "title") }).replace("{HOW}", s(a, "how"))
                 .replace("{TEXT}", s(a, "text")).replace("{AROUND}", &s(a, "around").chars().take(1500).collect::<String>());
             run_claude(&p, &[], 180).await.map(|t| json!(t.trim()))
         }
@@ -83,15 +89,15 @@ async fn mb(app: tauri::AppHandle, op: String, args: Value) -> Result<Value, Str
         "whisperStatus" => Ok(whisper::status()),
         "whisperGet" => { whisper::download(); Ok(json!(true)) }
         "transcribe" => {
-            let pcm = B64.decode(s(a, "pcm")).map_err(|_| "couldn't read that recording")?;
+            let pcm = B64.decode(s(a, "pcm")).map_err(|_| "não consegui ler essa gravação")?;
             let samples: Vec<f32> = pcm.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
             tokio::task::spawn_blocking(move || whisper::transcribe(&samples)).await.map_err(|e| e.to_string())?.map(Value::String)
         }
-        "export" => Err("Saving a picture of the board is coming to Windows soon ✦".into()),
+        "export" => Err("Salvar uma imagem do quadro chega no Windows em breve ✦".into()),
         "saveFile" => {
             let name = s(a, "name").replace(['/', '\\'], "-"); let ext = or(s(a, "ext"), "docx").to_string();
-            let data = B64.decode(s(a, "data")).map_err(|_| "Nothing to save")?;
-            let picked = app.dialog().file().set_file_name(format!("{}.{}", or(&name, "Document"), ext)).add_filter(ext.to_uppercase(), &[ext.as_str()]).blocking_save_file();
+            let data = B64.decode(s(a, "data")).map_err(|_| "Nada para salvar")?;
+            let picked = app.dialog().file().set_file_name(format!("{}.{}", or(&name, "Documento"), ext)).add_filter(ext.to_uppercase(), &[ext.as_str()]).blocking_save_file();
             match picked.and_then(|p| p.into_path().ok()) {
                 Some(p) => { std::fs::write(&p, data).map_err(|e| e.to_string())?; Ok(json!(p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())) }
                 None => Ok(json!("")),
@@ -107,14 +113,14 @@ async fn mb(app: tauri::AppHandle, op: String, args: Value) -> Result<Value, Str
         }
         "mediaChunk" => {
             use std::io::Write;
-            let name = s(a, "name").replace(['/', '\\'], ""); let d = B64.decode(s(a, "data")).map_err(|_| "I couldn't save that video.")?;
-            let mut f = std::fs::OpenOptions::new().append(true).open(media_dir().join(name)).map_err(|_| "I couldn't save that video.")?;
+            let name = s(a, "name").replace(['/', '\\'], ""); let d = B64.decode(s(a, "data")).map_err(|_| "Não consegui salvar esse vídeo.")?;
+            let mut f = std::fs::OpenOptions::new().append(true).open(media_dir().join(name)).map_err(|_| "Não consegui salvar esse vídeo.")?;
             f.write_all(&d).map_err(|e| e.to_string())?; Ok(json!(true))
         }
         "mediaEnd" => Ok(json!(format!("mbmedia://media/{}", s(a, "name").replace(['/', '\\'], "")))),
         // updates: GitHub Releases has a Windows installer next to the Mac zip
         "updateCheck" => Ok(update_check().await),
-        "updatePrepare" => Err("Automatic updates are coming to Windows soon.".into()),
+        "updatePrepare" => Err("Atualizações automáticas chegam no Windows em breve.".into()),
         "updateNow" => update_now(&app).await.map(Value::String),
         // a self-test hook for building: only there when MB_SELFTEST is set
         "log" if std::env::var("MB_SELFTEST").is_ok() => { println!("SELFTEST {}", s(a, "msg")); Ok(json!(true)) }
@@ -189,18 +195,18 @@ async fn connections() -> Value {
 // the prompt goes in through stdin: a board can be far longer than Windows allows on a command line
 async fn run_claude(prompt: &str, tools: &[&str], timeout: u64) -> Result<String, String> {
     use tokio::io::AsyncWriteExt;
-    let claude = find_claude().ok_or("I need Claude Code to think. Set it up from mochiboard.app/connect.html, then try again.")?;
+    let claude = find_claude().ok_or("Preciso do Claude Code para pensar. Configure-o em mochiboard.app/connect.html e tente novamente.")?;
     let mut c = claude_cmd(&claude); c.args(["-p", "--output-format", "json"]);
     if !tools.is_empty() { c.args(["--allowedTools", &tools.join(",")]); }
     let mut child = c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().map_err(|e| e.to_string())?;
     let mut stdin = child.stdin.take().unwrap(); let p = prompt.to_string();
     tokio::spawn(async move { let _ = stdin.write_all(p.as_bytes()).await; let _ = stdin.shutdown().await; });
-    let out = tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output()).await.map_err(|_| "Claude took too long to answer.")?.map_err(|e| e.to_string())?;
+    let out = tokio::time::timeout(Duration::from_secs(timeout), child.wait_with_output()).await.map_err(|_| "O Claude demorou muito para responder.")?.map_err(|e| e.to_string())?;
     let j: Option<Value> = serde_json::from_slice(&out.stdout).ok();
     let text = claude_result(j.as_ref(), &out.stdout);
     // a failed answer (not signed in, no plan…) comes back as an error, not as words for Mochi to read
     if j.as_ref().and_then(|j| j.get("is_error")).and_then(|v| v.as_bool()) == Some(true) { return Err(text.chars().take(300).collect()); }
-    if !out.status.success() && text.is_empty() { return Err(String::from_utf8_lossy(&out.stderr).chars().take(300).collect::<String>().trim().to_string().pipe_or("Claude Code didn't answer")); }
+    if !out.status.success() && text.is_empty() { return Err(String::from_utf8_lossy(&out.stderr).chars().take(300).collect::<String>().trim().to_string().pipe_or("O Claude Code não respondeu")); }
     Ok(text)
 }
 trait PipeOr { fn pipe_or(self, d: &str) -> String; }
@@ -263,6 +269,10 @@ fn installer_url(r: &Value) -> Option<String> {
 }
 async fn update_check() -> Value {
     let me = env!("CARGO_PKG_VERSION");
+    // PT-BR local build: do not overwrite with upstream English releases unless a custom feed/API is configured.
+    if std::env::var("MB_RELEASE_API").is_err() && FEED.is_none() {
+        return json!({ "release": true, "behind": 0, "notes": [], "since": format!("{me} (PT-BR)") });
+    }
     let Some(r) = latest_release().await else { return json!({ "release": true, "offline": true, "since": me }) };
     let tag = r["tag_name"].as_str().unwrap_or("").to_string();
     let notes: Vec<String> = r["body"].as_str().unwrap_or("").lines().map(str::trim).filter(|l| l.starts_with("- ")).map(|l| l[2..].to_string()).collect();
@@ -270,12 +280,12 @@ async fn update_check() -> Value {
     let mine: u64 = BUILD.and_then(|b| b.parse().ok()).unwrap_or(0);
     let fresh = match (FEED, r.get("build").and_then(|b| b.as_u64())) { (Some(_), Some(b)) => b > mine, _ => newer(&tag, me) };
     let behind = if fresh && installer_url(&r).is_some() { 1 } else { 0 };
-    json!({ "release": true, "behind": behind, "notes": notes, "since": if FEED.is_some() { format!("{me}, test build {}", BUILD.unwrap_or("?")) } else { me.to_string() }, "latest": if FEED.is_some() { format!("{tag} (test {})", r.get("build").and_then(|b| b.as_u64()).unwrap_or(0)) } else { tag } })
+    json!({ "release": true, "behind": behind, "notes": notes, "since": if FEED.is_some() { format!("{me}, build de teste {}", BUILD.unwrap_or("?")) } else { me.to_string() }, "latest": if FEED.is_some() { format!("{tag} (teste {})", r.get("build").and_then(|b| b.as_u64()).unwrap_or(0)) } else { tag } })
 }
 // download the new installer, start it, and step aside so it can replace this copy
 async fn update_now(app: &tauri::AppHandle) -> Result<String, String> {
-    let r = latest_release().await.ok_or("I couldn't reach GitHub just now.")?;
-    let url = installer_url(&r).ok_or("The Windows version of this update isn't ready yet. Try again in a bit.")?;
+    let r = latest_release().await.ok_or("Não consegui acessar o GitHub agora.")?;
+    let url = installer_url(&r).ok_or("A versão para Windows desta atualização ainda não está pronta. Tente novamente em instantes.")?;
     let bytes = client().get(url).timeout(Duration::from_secs(600)).send().await.map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?;
     let f = std::env::temp_dir().join(format!("mochiboard-update-{}.exe", uuid::Uuid::new_v4()));
     std::fs::write(&f, &bytes).map_err(|e| e.to_string())?;
@@ -337,24 +347,74 @@ fn allow_media(w: &tauri::WebviewWindow) {
     });
 }
 
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 fn main() {
     let _ = std::fs::create_dir_all(boards_dir()); let _ = std::fs::create_dir_all(media_dir());
     std::thread::spawn(sweep_media);
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .register_asynchronous_uri_scheme_protocol("mbmedia", |_ctx, req, responder| { std::thread::spawn(move || responder.respond(media_response(req))); })
         .invoke_handler(tauri::generate_handler![mb])
         .setup(|app| {
             #[cfg(windows)] if let Some(w) = app.get_webview_window("main") { allow_media(&w); }
+            let show_item = MenuItem::with_id(app, "show", "Abrir Mochiboard", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&show_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
+                .menu(&tray_menu)
+                .tooltip("Mochiboard")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => show_main(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            } else if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/32x32.png")) {
+                tray_builder = tray_builder.icon(icon);
+            }
+            let tray = tray_builder.build(app)?;
+            app.manage(tray);
             if let Ok(js) = std::env::var("MB_SELFTEST").map(|p| std::fs::read_to_string(p).unwrap_or_default()) {
                 let w = app.get_webview_window("main").unwrap();
                 std::thread::spawn(move || { std::thread::sleep(Duration::from_secs(5)); let _ = w.eval(&js); });
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .run(tauri::generate_context!())
-        .expect("Mochiboard couldn't start");
+        .expect("O Mochiboard não conseguiu iniciar");
 }
 #[allow(dead_code)]
 fn _unused(_: Map<String, Value>) {}
