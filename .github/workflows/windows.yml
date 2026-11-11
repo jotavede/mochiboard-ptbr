@@ -5,7 +5,7 @@ name: Windows build
 on:
   workflow_dispatch:
   push:
-    branches: [windows]   # the Windows work lives on its own branch; every push there builds a fresh installer
+    branches: [main, windows]   # builds automatically on main (for fork/web uploads) or windows branch
   release:
     types: [published]
 jobs:
@@ -28,12 +28,7 @@ jobs:
           $v = (Get-Content VERSION -Raw).Trim()
           (Get-Content src-tauri/Cargo.toml) -replace '^version = ".*"', "version = `"$v`"" | Set-Content src-tauri/Cargo.toml
           "MB_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Test builds update from the private feed, not public releases
-        if: github.event_name != 'release'
-        shell: pwsh
-        run: |
-          "MB_UPDATE_FEED=https://jessa.art/share/4o92hg0sx7/latest.json" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "MB_BUILD=${{ github.run_number }}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Build
         run: npx --yes @tauri-apps/cli@2 build --bundles nsis
       - name: Remember the build number
